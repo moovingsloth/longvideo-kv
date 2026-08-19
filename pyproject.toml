@@ -1,0 +1,37 @@
+[project]
+name = "longvideo-kv"
+version = "0.1.0"
+description = "Long-video KV cache quantization experiments (Qwen2.5-VL-7B-Instruct)"
+readme = "README.md"
+requires-python = "==3.12.3"
+dependencies = [
+  "accelerate==1.14.0",
+  "av==15.1.0",
+  "decord2==3.4.0",
+  "huggingface_hub==1.8.0",
+  "numpy==2.2.6",
+  "pandas==2.3.1",
+  "psutil==7.0.0",
+  "pyarrow==25.0.1",
+  "PyYAML==6.0.2",
+  "qwen-vl-utils==0.0.14",
+  "safetensors==0.8.0",
+  "transformers==5.15.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.4.1",
+  "ruff==0.12.7",
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

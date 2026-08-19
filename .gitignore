@@ -1,0 +1,13 @@
+.venv/
+third-party/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Model/download caches must stay outside version control.
+.cache/
+*.safetensors

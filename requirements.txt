@@ -1,0 +1,26 @@
+# PyTorch 2.11.0+cu130 is supplied by the DGX Spark/GB10 system image.
+# Create the venv with --system-site-packages; do not replace that wheel.
+# Interpreter is pinned to system Python 3.12.3 (see pyproject.toml
+# requires-python and scripts/setup_env.sh); a different minor/patch
+# would not share this site-packages install.
+#
+# pyarrow is pinned to 25.0.1, not the older 19.0.1, because lmms-eval's
+# `datasets` dependency requires it (see scripts/setup_env.sh).
+#
+# decord has no PyPI wheels for linux-aarch64 (dmlc/decord#207); decord2
+# ships manylinux_2_28_aarch64 wheels and installs as the same `decord`
+# module, so lmms-eval's `import decord` works unmodified.
+accelerate==1.14.0
+decord2==3.4.0
+av==15.1.0
+huggingface_hub==1.8.0
+numpy==2.2.6
+pandas==2.3.1
+psutil==7.0.0
+pyarrow==25.0.1
+PyYAML==6.0.2
+qwen-vl-utils==0.0.14
+safetensors==0.8.0
+transformers==5.15.0
+pytest==8.4.1
+ruff==0.12.7
