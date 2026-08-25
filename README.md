@@ -2,6 +2,11 @@
 
 Long-video KV cache quantization experiments.
 
+## Supported Environments
+
+- **GB10 (ARM64)**: H100 GPU (compute capability 12.1) on ARM64 architecture
+- **RTX 3090 (x86_64)**: RTX 3090 GPU (compute capability 8.6) on x86_64 architecture
+
 ## Model
 
 Fixed to **Qwen2.5-VL-7B-Instruct**. Do not swap models without updating this file.

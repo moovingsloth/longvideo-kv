@@ -19,12 +19,23 @@ def main() -> None:
 
     if platform.python_version() != "3.12.3":
         raise SystemExit(f"Expected pinned Python 3.12.3, got {platform.python_version()}")
-    if platform.machine() not in {"aarch64", "arm64"}:
-        raise SystemExit("This lock/setup is intended for the ARM64 GB10 baseline")
+
+    arch = platform.machine()
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is unavailable")
-    if torch.cuda.get_device_capability(0) != (12, 1):
-        raise SystemExit("Expected GB10 compute capability 12.1")
+
+    capability = torch.cuda.get_device_capability(0)
+
+    if arch in {"aarch64", "arm64"}:
+        if capability != (12, 1):
+            raise SystemExit(f"Expected GB10 compute capability 12.1, got {capability}")
+        print("✓ Verified GB10 environment (ARM64, H100)")
+    elif arch == "x86_64":
+        if capability != (8, 6):
+            raise SystemExit(f"Expected RTX 3090 compute capability 8.6, got {capability}")
+        print("✓ Verified RTX 3090 environment (x86_64)")
+    else:
+        raise SystemExit(f"Unsupported architecture: {arch}. Expected aarch64/arm64 (GB10) or x86_64 (RTX 3090)")
 
 
 if __name__ == "__main__":
