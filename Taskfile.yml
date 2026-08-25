@@ -1,0 +1,83 @@
+version: "3"
+
+vars:
+  TASKS: '{{.TASKS | default "longvideobench_val_v"}}'
+  SMOKE_TASKS: '{{.SMOKE_TASKS | default "mmstar"}}'
+  FRAMES: '{{.FRAMES | default "48"}}'
+  MIN_PIXELS: '{{.MIN_PIXELS | default "200704"}}'
+  MAX_PIXELS: '{{.MAX_PIXELS | default "401408"}}'
+  FPS: '{{.FPS | default ""}}'
+  LOG_VIDEO_GRID: '{{.LOG_VIDEO_GRID | default "0"}}'
+  VIDEO_READER: '{{.VIDEO_READER | default "torchcodec"}}'
+  STRICT_VIDEO_READER: '{{.STRICT_VIDEO_READER | default "1"}}'
+  TORCHCODEC_NUM_THREADS: '{{.TORCHCODEC_NUM_THREADS | default "8"}}'
+  ATTN_IMPLEMENTATION: '{{.ATTN_IMPLEMENTATION | default "flash_attention_2"}}'
+  GPUS: '{{.GPUS | default "1"}}'
+  PORT: '{{.PORT | default "12346"}}'
+  OUTPUT_PATH: '{{.OUTPUT_PATH | default "./results"}}'
+  CUDA_VISIBLE_DEVICES: '{{.CUDA_VISIBLE_DEVICES | default "0"}}'
+  HF_HOME: '{{.HF_HOME | default "$HOME/.cache/huggingface"}}'
+  DECODE_LIMIT: '{{.DECODE_LIMIT | default ""}}'
+  DECODE_REPEAT: '{{.DECODE_REPEAT | default "1"}}'
+
+tasks:
+  setup:
+    desc: Set up the Pixi environment and verify CUDA/FlashAttention2.
+    cmds:
+      - bash scripts/setup_pixi.sh
+
+  setup-venv:
+    desc: Set up the legacy uv virtualenv and verify CUDA.
+    cmds:
+      - ./scripts/setup_env.sh
+
+  smoke:
+    desc: Run a one-sample Qwen2.5-VL lmms-eval smoke test.
+    aliases: [smote]
+    cmds:
+      - >-
+        CUDA_VISIBLE_DEVICES={{.CUDA_VISIBLE_DEVICES}} HF_HOME={{.HF_HOME}} PYTHONNOUSERSITE=1 PYTHONPATH= LOG_VIDEO_GRID={{.LOG_VIDEO_GRID}}
+        FORCE_QWENVL_VIDEO_READER={{.VIDEO_READER}} STRICT_VIDEO_READER={{.STRICT_VIDEO_READER}} TORCHCODEC_NUM_THREADS={{.TORCHCODEC_NUM_THREADS}}
+        pixi run accelerate launch
+        --num_processes={{.GPUS}}
+        --main_process_port={{.PORT}}
+        -m lmms_eval
+        --model qwen2_5_vl
+        --model_args pretrained=Qwen/Qwen2.5-VL-7B-Instruct,min_pixels={{.MIN_PIXELS}},max_pixels={{.MAX_PIXELS}},attn_implementation={{.ATTN_IMPLEMENTATION}},interleave_visuals=False,max_num_frames={{.FRAMES}}{{if .FPS}},fps={{.FPS}}{{end}}
+        --tasks {{.SMOKE_TASKS}}
+        --batch_size 1
+        --limit 1
+        --output_path {{.OUTPUT_PATH}}
+        {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
+
+  full:
+    desc: Run the full Qwen2.5-VL lmms-eval experiment.
+    cmds:
+      - >-
+        CUDA_VISIBLE_DEVICES={{.CUDA_VISIBLE_DEVICES}} HF_HOME={{.HF_HOME}} PYTHONNOUSERSITE=1 PYTHONPATH= LOG_VIDEO_GRID={{.LOG_VIDEO_GRID}}
+        FORCE_QWENVL_VIDEO_READER={{.VIDEO_READER}} STRICT_VIDEO_READER={{.STRICT_VIDEO_READER}} TORCHCODEC_NUM_THREADS={{.TORCHCODEC_NUM_THREADS}}
+        pixi run accelerate launch
+        --num_processes={{.GPUS}}
+        --main_process_port={{.PORT}}
+        -m lmms_eval
+        --model qwen2_5_vl
+        --model_args pretrained=Qwen/Qwen2.5-VL-7B-Instruct,min_pixels={{.MIN_PIXELS}},max_pixels={{.MAX_PIXELS}},attn_implementation={{.ATTN_IMPLEMENTATION}},interleave_visuals=False,max_num_frames={{.FRAMES}}{{if .FPS}},fps={{.FPS}}{{end}}
+        --tasks {{.TASKS}}
+        --batch_size 1
+        --output_path {{.OUTPUT_PATH}}
+        {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
+
+  check-video-decode:
+    desc: Preflight LongVideoBench video decoding with the same fixed backend used by evaluation.
+    cmds:
+      - >-
+        HF_HOME={{.HF_HOME}} PYTHONNOUSERSITE=1 PYTHONPATH=
+        FORCE_QWENVL_VIDEO_READER={{.VIDEO_READER}} STRICT_VIDEO_READER={{.STRICT_VIDEO_READER}} TORCHCODEC_NUM_THREADS={{.TORCHCODEC_NUM_THREADS}}
+        pixi run python scripts/check_video_decode.py
+        --frames {{.FRAMES}}
+        --min-pixels {{.MIN_PIXELS}}
+        --max-pixels {{.MAX_PIXELS}}
+        --repeat {{.DECODE_REPEAT}}
+        --output-path {{.OUTPUT_PATH}}/video-decode-preflight.jsonl
+        {{if .FPS}}--fps {{.FPS}}{{end}}
+        {{if .DECODE_LIMIT}}--limit {{.DECODE_LIMIT}}{{end}}

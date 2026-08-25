@@ -1,0 +1,607 @@
+diff --git a/lmms_eval/evaluator.py b/lmms_eval/evaluator.py
+index 96ed9c8..b101382 100755
+--- a/lmms_eval/evaluator.py
++++ b/lmms_eval/evaluator.py
+@@ -64,6 +64,7 @@ from lmms_eval.utils import (
+     get_git_branch_name,
+     get_git_commit_hash,
+     get_lmms_eval_version_string,
++    get_reproducibility_info,
+     handle_non_serializable,
+     hash_string,
+     is_multimodal_content,
+@@ -599,6 +600,7 @@ def simple_evaluate(
+         results["git_hash"] = get_git_commit_hash()
+         results["git_branch"] = get_git_branch_name()
+         results["lmms_eval_version"] = get_lmms_eval_version_string()
++        results["reproducibility"] = get_reproducibility_info()
+         results["date"] = datetime_str
+         throughput_summary = summarize_logged_metrics()
+         if throughput_summary:
+diff --git a/lmms_eval/loggers/wandb_logger.py b/lmms_eval/loggers/wandb_logger.py
+index 8997877..33b034e 100644
+--- a/lmms_eval/loggers/wandb_logger.py
++++ b/lmms_eval/loggers/wandb_logger.py
+@@ -1,5 +1,6 @@
+ import copy
+ import json
++from numbers import Real
+ from typing import Any, Dict, List, Literal, Tuple
+ 
+ import numpy as np
+@@ -10,6 +11,10 @@ from packaging.version import Version
+ from lmms_eval.loggers.utils import _handle_non_serializable, remove_none_pattern
+ 
+ 
++def _is_wandb_scalar(value: Any) -> bool:
++    return isinstance(value, Real) and not isinstance(value, bool)
++
++
+ def get_wandb_printer() -> Literal["Printer"]:
+     """Returns a wandb printer instance for pretty stdout."""
+     from wandb.sdk.wandb_settings import Settings
+@@ -67,10 +72,12 @@ class WandbLogger:
+             "task_configs": self.task_configs,
+             "cli_configs": cli_configs,
+         }
++        if self.results.get("reproducibility"):
++            configs["reproducibility"] = self.results["reproducibility"]
+ 
+         return configs
+ 
+-    def _sanitize_results_dict(self) -> Tuple[Dict[str, str], Dict[str, Any]]:
++    def _sanitize_results_dict(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+         """Sanitize the results dictionary."""
+         _results = copy.deepcopy(self.results.get("results", dict()))
+ 
+@@ -84,17 +91,23 @@ class WandbLogger:
+                     _results[task_name][_metric_name] = metric_value
+                     _results[task_name].pop(metric_name)
+ 
+-        # remove string valued keys from the results dict
++        # Keep only real-valued scalars in run.log(); W&B rejects list/dict metrics.
+         wandb_summary = {}
++        non_scalar_metrics = []
+         for task in self.task_names:
+             task_result = _results.get(task, dict())
+             for metric_name, metric_value in task_result.items():
+                 if isinstance(metric_value, str):
+                     wandb_summary[f"{task}/{metric_name}"] = metric_value
++                elif not _is_wandb_scalar(metric_value):
++                    non_scalar_metrics.append(f"{task}/{metric_name}")
+ 
+         for summary_metric, summary_value in wandb_summary.items():
+             _task, _summary_metric = summary_metric.split("/")
+             _results[_task].pop(_summary_metric)
++        for metric in non_scalar_metrics:
++            _task, _metric = metric.split("/")
++            _results[_task].pop(_metric)
+ 
+         tmp_results = copy.deepcopy(_results)
+         for task_name, task_results in tmp_results.items():
+@@ -137,11 +150,13 @@ class WandbLogger:
+                         continue
+                     if m == "alias":
+                         continue
++                    if not (_is_wandb_scalar(v) or isinstance(v, str)):
++                        continue
+ 
+                     if m + "_stderr" + "," + f in dic:
+                         se = dic[m + "_stderr" + "," + f]
+                         if se != "N/A":
+-                            se = "%.4f" % se
++                            se = "%.4f" % se if _is_wandb_scalar(se) else str(se)
+                         table.add_data(*[k, version, f, n, m, str(v), str(se)])
+                     else:
+                         table.add_data(*[k, version, f, n, m, str(v), ""])
+diff --git a/lmms_eval/logging_utils.py b/lmms_eval/logging_utils.py
+index 2264e4d..39cb963 100755
+--- a/lmms_eval/logging_utils.py
++++ b/lmms_eval/logging_utils.py
+@@ -3,6 +3,7 @@ import copy
+ import json
+ import os
+ import re
++from numbers import Real
+ from typing import Any, Dict, List, Literal, Tuple, Union
+ 
+ import numpy as np
+@@ -13,6 +14,10 @@ from packaging.version import Version
+ 
+ from lmms_eval import utils
+ 
++def _is_wandb_scalar(value: Any) -> bool:
++    return isinstance(value, Real) and not isinstance(value, bool)
++
++
+ try:
+     import wandb
+ 
+@@ -109,10 +114,12 @@ class WandbLogger:
+             "task_configs": self.task_configs,
+             "cli_configs": cli_configs,
+         }
++        if self.results.get("reproducibility"):
++            configs["reproducibility"] = self.results["reproducibility"]
+ 
+         return configs
+ 
+-    def _sanitize_results_dict(self) -> Tuple[Dict[str, str], Dict[str, Any]]:
++    def _sanitize_results_dict(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+         """Sanitize the results dictionary."""
+         _results = copy.deepcopy(self.results.get("results", dict()))
+         _results["model_configs"] = self.results.get("model_configs", dict())
+@@ -127,19 +134,25 @@ class WandbLogger:
+                     _results[task_name][_metric_name] = metric_value
+                     _results[task_name].pop(metric_name)
+ 
+-        # remove string valued keys from the results dict
++        # Keep only real-valued scalars in run.log(); W&B rejects list/dict metrics.
+         wandb_summary = {}
++        non_scalar_metrics = []
+         for task in self.task_names:
+             task_result = _results.get(task, dict())
+             for metric_name, metric_value in task_result.items():
+                 if isinstance(metric_value, str):
+                     wandb_summary[f"{task}/{metric_name}"] = metric_value
++                elif not _is_wandb_scalar(metric_value):
++                    non_scalar_metrics.append(f"{task}/{metric_name}")
+ 
+         wandb_summary["model_configs"] = self.results.get("model_configs", dict())
+         for summary_metric, summary_value in wandb_summary.items():
+             if summary_metric != "model_configs":
+                 _task, _summary_metric = summary_metric.split("/")
+                 _results[_task].pop(_summary_metric)
++        for metric in non_scalar_metrics:
++            _task, _metric = metric.split("/")
++            _results[_task].pop(_metric)
+ 
+         tmp_results = copy.deepcopy(_results)
+         for task_name, task_results in tmp_results.items():
+@@ -187,11 +200,13 @@ class WandbLogger:
+                         continue
+                     if m == "alias":
+                         continue
++                    if not (_is_wandb_scalar(v) or isinstance(v, str)):
++                        continue
+ 
+                     if m + "_stderr" + "," + f in dic:
+                         se = dic[m + "_stderr" + "," + f]
+                         if se != "N/A":
+-                            se = "%.4f" % se
++                            se = "%.4f" % se if _is_wandb_scalar(se) else str(se)
+                         data = [model_name, model_args, k, version, f, n, m, str(v), str(se)]
+                         if key == "groups":
+                             data = [self.group_names] + data
+diff --git a/lmms_eval/models/chat/qwen2_5_vl.py b/lmms_eval/models/chat/qwen2_5_vl.py
+index d461c77..5bb04a1 100644
+--- a/lmms_eval/models/chat/qwen2_5_vl.py
++++ b/lmms_eval/models/chat/qwen2_5_vl.py
+@@ -4,11 +4,6 @@ from typing import List
+ from loguru import logger as eval_logger
+ from tqdm import tqdm
+ 
+-try:
+-    import decord
+-except ImportError:
+-    decord = None
+-
+ from lmms_eval import utils
+ from lmms_eval.api.instance import GenerationResult, Instance, TokenCounts
+ from lmms_eval.api.registry import register_model
+@@ -68,24 +63,10 @@ class Qwen2_5_VL(Qwen2_5_VLSimple):
+             }
+             if self.fps is not None:
+                 video_kwargs["fps"] = self.fps
++                video_kwargs["max_frames"] = self.max_num_frames
+             else:
+-                # Probe videos to get frame count and set nframes = min(max_num_frames, total_frames)
+-                # This avoids the error when video has fewer frames than max_num_frames
+-                if videos and decord is not None:
+-                    try:
+-                        video_path = videos[0]  # Assume batch size 1 for videos
+-                        vr = decord.VideoReader(video_path)
+-                        video_total_frames = len(vr)
+-                        nframes = min(self.max_num_frames, video_total_frames)
+-                        # qwen_vl_utils requires nframes to be a multiple of 2 (FRAME_FACTOR)
+-                        # and rounds using round_by_factor, so we need to floor to even number
+-                        # to avoid rounding up past total_frames
+-                        nframes = (nframes // 2) * 2  # Floor to nearest even number
+-                        nframes = max(2, nframes)  # At least 2 frames
+-                        video_kwargs["nframes"] = nframes
+-                    except Exception as e:
+-                        eval_logger.warning(f"Failed to probe video {videos[0]}: {e}, using default nframes")
+-                        video_kwargs["nframes"] = self.max_num_frames
++                if videos:
++                    video_kwargs["nframes"] = self._safe_nframes(videos[0])
+                 else:
+                     video_kwargs["nframes"] = self.max_num_frames
+             batched_messages = [chat_message.to_hf_messages(video_kwargs=video_kwargs) for chat_message in chat_messages]
+@@ -100,6 +81,7 @@ class Qwen2_5_VL(Qwen2_5_VLSimple):
+             if video_inputs is not None:
+                 video_inputs, video_metadatas = zip(*video_inputs)
+                 video_inputs, video_metadatas = list(video_inputs), list(video_metadatas)
++            self._log_video_metadata(video_metadatas)
+ 
+             padding_side = "left" if self.batch_size > 1 else "right"
+             inputs = self.processor(
+@@ -111,6 +93,7 @@ class Qwen2_5_VL(Qwen2_5_VLSimple):
+                 padding_side=padding_side,
+                 return_tensors="pt",
+             )
++            self._log_video_grid(inputs)
+ 
+             if self.device_map == "auto":
+                 inputs = inputs.to("cuda")
+diff --git a/lmms_eval/models/simple/qwen2_5_vl.py b/lmms_eval/models/simple/qwen2_5_vl.py
+index 1285a3b..694e940 100644
+--- a/lmms_eval/models/simple/qwen2_5_vl.py
++++ b/lmms_eval/models/simple/qwen2_5_vl.py
+@@ -1,7 +1,7 @@
++import os
+ import re
+ from typing import List, Optional, Tuple, Union
+ 
+-import decord
+ import numpy as np
+ import torch
+ from accelerate import Accelerator, DistributedType
+@@ -83,6 +83,7 @@ class Qwen2_5_VL(lmms):
+         self.min_pixels = min_pixels
+         self.max_num_frames = max_num_frames
+         self.fps = fps
++        self._configure_video_reader()
+ 
+         if reasoning_prompt:
+             self.reasoning_prompt = reasoning_prompt.replace("\\n", "\n")
+@@ -176,6 +177,116 @@ class Qwen2_5_VL(lmms):
+             quality=85,
+         )
+ 
++    def _configure_video_reader(self) -> None:
++        forced_reader = os.environ.get("FORCE_QWENVL_VIDEO_READER")
++        strict_reader = os.environ.get("STRICT_VIDEO_READER", "").lower() in {"1", "true", "yes"}
++        if not forced_reader and not strict_reader:
++            return
++
++        try:
++            import qwen_vl_utils.vision_process as qwen_vision_process
++        except Exception as exc:
++            raise RuntimeError("Failed to import qwen_vl_utils.vision_process while configuring video reader") from exc
++
++        if forced_reader:
++            qwen_vision_process.get_video_reader_backend.cache_clear()
++            selected_reader = qwen_vision_process.get_video_reader_backend()
++            if selected_reader != forced_reader:
++                raise RuntimeError(f"Expected qwen-vl-utils video reader {forced_reader!r}, got {selected_reader!r}")
++        else:
++            selected_reader = qwen_vision_process.get_video_reader_backend()
++
++        if strict_reader and selected_reader != "torchvision":
++            def _fail_torchvision_fallback(ele):
++                video = ele.get("video", "<unknown>")
++                raise RuntimeError(
++                    f"Strict video reader is enabled: {selected_reader!r} failed for {video!r}; "
++                    "refusing qwen-vl-utils torchvision fallback."
++                )
++
++            qwen_vision_process.VIDEO_READER_BACKENDS["torchvision"] = _fail_torchvision_fallback
++
++        eval_logger.info("qwen-vl-utils video reader backend={} strict={}", selected_reader, strict_reader)
++
++    def _safe_nframes(self, visual: str) -> int:
++        target_frames = int(self.max_num_frames)
++        try:
++            import qwen_vl_utils.vision_process as qwen_vision_process
++
++            reader = qwen_vision_process.get_video_reader_backend()
++            if reader == "torchcodec":
++                from torchcodec.decoders import VideoDecoder
++
++                total_frames = VideoDecoder(visual, num_ffmpeg_threads=1).metadata.num_frames
++            elif reader == "decord":
++                import decord
++
++                vr = decord.VideoReader(visual)
++                total_frames = len(vr)
++            else:
++                return target_frames
++
++            nframes = min(target_frames, int(total_frames))
++            nframes = (nframes // 2) * 2
++            return max(2, nframes)
++        except Exception as exc:
++            eval_logger.warning("Failed to probe video frame count for {}: {}; using max_num_frames={}", visual, exc, target_frames)
++            return target_frames
++
++    def _video_content(self, visual: str) -> dict:
++        content = {
++            "type": "video",
++            "video": visual,
++            "max_pixels": self.max_pixels,
++            "min_pixels": self.min_pixels,
++        }
++        if self.fps is None:
++            content["nframes"] = self._safe_nframes(visual)
++        else:
++            content["fps"] = self.fps
++            content["max_frames"] = self.max_num_frames
++        return content
++
++    def _log_video_grid(self, inputs) -> None:
++        if os.environ.get("LOG_VIDEO_GRID", "").lower() not in {"1", "true", "yes"}:
++            return
++        if "video_grid_thw" not in inputs:
++            return
++
++        merge_size = getattr(self.processor.image_processor, "merge_size", 2)
++        for idx, grid in enumerate(inputs["video_grid_thw"]):
++            t, h, w = [int(value) for value in grid.tolist()]
++            visual_tokens = t * h * w // (merge_size**2)
++            message = (
++                f"video_grid_thw[{idx}]=(T={t},H={h},W={w}), "
++                f"visual_tokens={visual_tokens}, merge_size={merge_size}, "
++                f"max_num_frames={self.max_num_frames}, max_pixels={self.max_pixels}, "
++                f"min_pixels={self.min_pixels}, fps={self.fps}"
++            )
++            print(message, flush=True)
++            eval_logger.info(
++                "{}",
++                message,
++            )
++
++    def _log_video_metadata(self, video_metadatas) -> None:
++        if os.environ.get("LOG_VIDEO_GRID", "").lower() not in {"1", "true", "yes"}:
++            return
++        if not video_metadatas:
++            return
++
++        for idx, metadata in enumerate(video_metadatas):
++            frame_indices = metadata.get("frames_indices", [])
++            head = frame_indices[:3]
++            tail = frame_indices[-3:] if len(frame_indices) >= 3 else frame_indices
++            message = (
++                f"video_metadata[{idx}]=backend={metadata.get('video_backend')}, "
++                f"fps={metadata.get('fps')}, total_num_frames={metadata.get('total_num_frames')}, "
++                f"sampled_frames={len(frame_indices)}, frame_indices_head={head}, frame_indices_tail={tail}"
++            )
++            print(message, flush=True)
++            eval_logger.info("{}", message)
++
+     def generate_until(self, requests: List[Instance]) -> List[str]:
+         res = []
+ 
+@@ -234,18 +345,7 @@ class Qwen2_5_VL(lmms):
+                 if visual_list[i] is not None:
+                     for visual in visual_list[i]:
+                         if isinstance(visual, str) and visual.endswith((".mp4", ".avi", ".mov")):  # Video file
+-                            vr = decord.VideoReader(visual)
+-                            first_frame = vr[0].asnumpy()
+-                            height, width = first_frame.shape[:2]
+-                            # max_pixels = height * width
+-                            processed_visuals.append(
+-                                {
+-                                    "type": "video",
+-                                    "video": visual,
+-                                    "max_pixels": self.max_pixels,
+-                                    "min_pixels": self.min_pixels,
+-                                }
+-                            )
++                            processed_visuals.append(self._video_content(visual))
+                         elif isinstance(visual, Image.Image):  # Handle both single and multiple images
+                             processed_visuals.append(
+                                 {
+@@ -308,6 +408,7 @@ class Qwen2_5_VL(lmms):
+                 padding_side=padding_side,
+                 return_tensors="pt",
+             )
++            self._log_video_grid(inputs)
+             if self.device_map == "auto":
+                 inputs = inputs.to("cuda")
+             else:
+@@ -451,17 +552,7 @@ class Qwen2_5_VL(lmms):
+                     if visuals_list[i] is not None:
+                         for visual in visuals_list[i]:
+                             if isinstance(visual, str) and visual.endswith((".mp4", ".avi", ".mov")):
+-                                vr = decord.VideoReader(visual)
+-                                first_frame = vr[0].asnumpy()
+-                                height, width = first_frame.shape[:2]
+-                                processed_visuals.append(
+-                                    {
+-                                        "type": "video",
+-                                        "video": visual,
+-                                        "max_pixels": self.max_pixels,
+-                                        "min_pixels": self.min_pixels,
+-                                    }
+-                                )
++                                processed_visuals.append(self._video_content(visual))
+                             elif isinstance(visual, Image.Image):
+                                 processed_visuals.append(
+                                     {
+@@ -520,6 +611,7 @@ class Qwen2_5_VL(lmms):
+                     padding=True,
+                     return_tensors="pt",
+                 )
++                self._log_video_grid(inputs)
+ 
+                 if self.device_map == "auto":
+                     inputs = inputs.to("cuda")
+diff --git a/lmms_eval/utils.py b/lmms_eval/utils.py
+index 73b1728..5419c2f 100755
+--- a/lmms_eval/utils.py
++++ b/lmms_eval/utils.py
+@@ -790,6 +790,174 @@ def _git_output(*args: str) -> str:
+     )
+ 
+ 
++def _git_output_from(repo_root: pathlib.Path, *args: str) -> str | None:
++    try:
++        return (
++            subprocess.check_output(
++                ["git", "-C", str(repo_root), *args],
++                stderr=subprocess.DEVNULL,
++            )
++            .strip()
++            .decode()
++        )
++    except (subprocess.CalledProcessError, FileNotFoundError, UnicodeDecodeError):
++        return None
++
++
++def _git_bytes_from(repo_root: pathlib.Path, *args: str) -> bytes:
++    try:
++        return subprocess.check_output(
++            ["git", "-C", str(repo_root), *args],
++            stderr=subprocess.DEVNULL,
++        )
++    except (subprocess.CalledProcessError, FileNotFoundError):
++        return b""
++
++
++def _sha256_bytes(payload: bytes) -> str:
++    return hashlib.sha256(payload).hexdigest()
++
++
++def _sha256_file(path: pathlib.Path) -> str | None:
++    try:
++        return _sha256_bytes(path.read_bytes())
++    except OSError:
++        return None
++
++
++def _repo_state(repo_root: pathlib.Path) -> dict[str, Any]:
++    status = _git_output_from(repo_root, "status", "--short", "--untracked-files=normal")
++    status_lines = status.splitlines() if status else []
++    tracked_status = _git_output_from(repo_root, "status", "--short", "--untracked-files=no")
++    tracked_status_lines = tracked_status.splitlines() if tracked_status else []
++    untracked_status_lines = [line for line in status_lines if line.startswith("?? ")]
++    diff = _git_bytes_from(repo_root, "diff", "--binary", "--no-ext-diff")
++    return {
++        "path": str(repo_root),
++        "branch": _git_output_from(repo_root, "branch", "--show-current"),
++        "commit": _git_output_from(repo_root, "rev-parse", "HEAD"),
++        "dirty": bool(status_lines),
++        "tracked_dirty": bool(tracked_status_lines),
++        "status_sha256": hash_string("\n".join(status_lines)) if status_lines else None,
++        "status": status_lines[:200],
++        "status_truncated": len(status_lines) > 200,
++        "tracked_status": tracked_status_lines[:200],
++        "tracked_status_truncated": len(tracked_status_lines) > 200,
++        "untracked_status": untracked_status_lines[:200],
++        "untracked_status_truncated": len(untracked_status_lines) > 200,
++        "tracked_diff_sha256": _sha256_bytes(diff) if diff else None,
++    }
++
++
++def _package_version(package_name: str) -> str | None:
++    try:
++        import importlib.metadata
++
++        return importlib.metadata.version(package_name)
++    except Exception:
++        return None
++
++
++def get_reproducibility_info() -> dict[str, Any]:
++    workspace_root = pathlib.Path(os.getcwd()).resolve()
++    resolved_workspace = _git_output_from(workspace_root, "rev-parse", "--show-toplevel")
++    if resolved_workspace:
++        workspace_root = pathlib.Path(resolved_workspace).resolve()
++
++    lmms_root = _lmms_eval_repo_root().resolve()
++    file_hashes = {}
++    for relative_path in (
++        "pixi.toml",
++        "pixi.lock",
++        "Taskfile.yml",
++        "scripts/setup_pixi.sh",
++        "scripts/verify_environment.py",
++        "scripts/check_video_decode.py",
++        "patches/lmms-eval-qwen-video-repro.patch",
++        "third-party/lmms-eval/lmms_eval/models/simple/qwen2_5_vl.py",
++        "third-party/lmms-eval/lmms_eval/models/chat/qwen2_5_vl.py",
++        "third-party/lmms-eval/lmms_eval/loggers/wandb_logger.py",
++    ):
++        file_hash = _sha256_file(workspace_root / relative_path)
++        if file_hash:
++            file_hashes[relative_path] = file_hash
++
++    env_keys = (
++        "CUDA_VISIBLE_DEVICES",
++        "HF_HOME",
++        "PYTHONNOUSERSITE",
++        "PYTHONPATH",
++        "FORCE_QWENVL_VIDEO_READER",
++        "STRICT_VIDEO_READER",
++        "TORCHCODEC_NUM_THREADS",
++        "LOG_VIDEO_GRID",
++    )
++
++    package_versions = {
++        package: _package_version(package)
++        for package in (
++            "torch",
++            "torchvision",
++            "torchcodec",
++            "flash-attn",
++            "transformers",
++            "qwen-vl-utils",
++            "accelerate",
++            "wandb",
++            "decord2",
++            "av",
++        )
++    }
++
++    video_reader = None
++    torchvision_has_read_video = None
++    try:
++        import qwen_vl_utils.vision_process as qwen_vision_process
++
++        qwen_vision_process.get_video_reader_backend.cache_clear()
++        video_reader = qwen_vision_process.get_video_reader_backend()
++    except Exception as exc:
++        video_reader = f"unavailable: {exc}"
++    try:
++        import torchvision
++
++        torchvision_has_read_video = hasattr(torchvision.io, "read_video")
++    except Exception:
++        torchvision_has_read_video = None
++
++    ffmpeg_version = None
++    try:
++        ffmpeg_version = subprocess.check_output(["ffmpeg", "-version"], stderr=subprocess.DEVNULL).decode().splitlines()[0]
++    except Exception:
++        pass
++
++    cuda_info = {}
++    try:
++        cuda_info = {
++            "torch_cuda": torch.version.cuda,
++            "cuda_available": torch.cuda.is_available(),
++            "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
++            "capability": list(torch.cuda.get_device_capability(0)) if torch.cuda.is_available() else None,
++        }
++    except Exception as exc:
++        cuda_info = {"error": str(exc)}
++
++    repos = {"workspace": _repo_state(workspace_root)}
++    if lmms_root != workspace_root:
++        repos["lmms_eval"] = _repo_state(lmms_root)
++
++    return {
++        "repos": repos,
++        "file_sha256": file_hashes,
++        "env": {key: os.environ.get(key) for key in env_keys if key in os.environ},
++        "package_versions": package_versions,
++        "ffmpeg": ffmpeg_version,
++        "cuda": cuda_info,
++        "qwen_vl_utils_video_reader": video_reader,
++        "torchvision_has_read_video": torchvision_has_read_video,
++    }
++
++
+ def _first_env(*names: str) -> str | None:
+     for name in names:
+         value = os.environ.get(name, "").strip()
