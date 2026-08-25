@@ -64,8 +64,15 @@ rules `E,F,I,UP,B`). Tests: `pytest` (`testpaths = ["tests"]`; no `tests/` direc
 ## Architecture
 
 - `patches/` — KV cache implementations applied on top of `third-party/lmms-eval`: `fp16_cache.py`
-  (baseline, unquantized), `kivi_cache.py` (KIVI quantization), `vidkv_cache.py` (VidKV
-  quantization). These are currently empty placeholders.
+  (baseline, unquantized — still an empty placeholder), `kivi_cache.py` (KIVI quantization),
+  `vidkv_cache.py` (VidKV quantization). KIVI and VidKV are implemented as `Cache`/`QuantizedLayer`
+  subclasses selected via the `kv_cache=` model arg. Both store quantized chunks **append-only**:
+  a chunk is never re-quantized once written, because re-quantizing dequantized history compounds
+  error on every flush. `patches/` is importable only because tasks run with cwd = repo root
+  (`accelerate launch -m` puts cwd on `sys.path`); `PYTHONPATH` is deliberately blanked.
+- `patches/lmms-eval-*.patch` — edits to the vendored harness, applied in array order by both
+  setup scripts. Regenerate a patch by diffing against the *previous* patch's output, not
+  against HEAD, since they stack on the same files.
 - `third-party/lmms-eval/` — vendored upstream eval harness; not modified directly, gitignored.
   Editable-installed via pip (`setup_env.sh`) or as a pypi-dependency path in `pixi.toml`.
 - `scripts/verify_environment.py` — single source of truth for "is this the right GPU/arch/driver

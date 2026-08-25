@@ -8,6 +8,7 @@ LMMS_EVAL_BASE_COMMIT="7e71cb99ddf8fe85c29e5f256dca5200cbd6211d"
 LMMS_EVAL_PATCHES=(
   "${REPO_ROOT}/patches/lmms-eval-qwen-video-repro.patch"
   "${REPO_ROOT}/patches/lmms-eval-kivi-cache.patch"
+  "${REPO_ROOT}/patches/lmms-eval-vidkv-cache.patch"
 )
 
 if [[ ! -x .venv/bin/python ]]; then

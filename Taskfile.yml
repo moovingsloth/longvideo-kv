@@ -3,6 +3,7 @@ version: "3"
 vars:
   TASKS: '{{.TASKS | default "longvideobench_val_v"}}'
   SMOKE_TASKS: '{{.SMOKE_TASKS | default "mmstar"}}'
+  SMOKE_LIMIT: '{{.SMOKE_LIMIT | default "1"}}'
   FRAMES: '{{.FRAMES | default "48"}}'
   MIN_PIXELS: '{{.MIN_PIXELS | default "200704"}}'
   MAX_PIXELS: '{{.MAX_PIXELS | default "401408"}}'
@@ -15,6 +16,9 @@ vars:
   GPUS: '{{.GPUS | default "1"}}'
   PORT: '{{.PORT | default "12346"}}'
   OUTPUT_PATH: '{{.OUTPUT_PATH | default "./results"}}'
+  # On by default: without per-sample logs there is no way to tell a cache that changed the
+  # generations from one that silently did nothing. Set LOG_SAMPLES=0 to opt out.
+  LOG_SAMPLES: '{{.LOG_SAMPLES | default "1"}}'
   CUDA_VISIBLE_DEVICES: '{{.CUDA_VISIBLE_DEVICES | default "0"}}'
   HF_HOME: '{{.HF_HOME | default "$HOME/.cache/huggingface"}}'
   DECODE_LIMIT: '{{.DECODE_LIMIT | default ""}}'
@@ -31,6 +35,13 @@ vars:
   KIVI_NBITS: '{{.KIVI_NBITS | default "2"}}'
   KIVI_Q_GROUP_SIZE: '{{.KIVI_Q_GROUP_SIZE | default "32"}}'
   KIVI_RESIDUAL_LENGTH: '{{.KIVI_RESIDUAL_LENGTH | default "128"}}'
+  VIDKV_OUTPUT_PATH: '{{.VIDKV_OUTPUT_PATH | default "./results/vidkv-cache-experiment.json"}}'
+  VIDKV_EVAL_OUTPUT_PATH: '{{.VIDKV_EVAL_OUTPUT_PATH | default "./results/vidkv-lmms-eval"}}'
+  VIDKV_NBITS_KEY: '{{.VIDKV_NBITS_KEY | default "1.5"}}'
+  VIDKV_NBITS_VALUE: '{{.VIDKV_NBITS_VALUE | default "1.58"}}'
+  VIDKV_TERNARY_THRESHOLD: '{{.VIDKV_TERNARY_THRESHOLD | default "0.7"}}'
+  VIDKV_Q_GROUP_SIZE: '{{.VIDKV_Q_GROUP_SIZE | default "32"}}'
+  VIDKV_RESIDUAL_LENGTH: '{{.VIDKV_RESIDUAL_LENGTH | default "128"}}'
 
 tasks:
   setup:
@@ -58,8 +69,9 @@ tasks:
         --model_args pretrained=Qwen/Qwen2.5-VL-7B-Instruct,min_pixels={{.MIN_PIXELS}},max_pixels={{.MAX_PIXELS}},attn_implementation={{.ATTN_IMPLEMENTATION}},interleave_visuals=False,max_num_frames={{.FRAMES}}{{if .FPS}},fps={{.FPS}}{{end}}
         --tasks {{.SMOKE_TASKS}}
         --batch_size 1
-        --limit 1
+        --limit {{.SMOKE_LIMIT}}
         --output_path {{.OUTPUT_PATH}}
+        {{if eq .LOG_SAMPLES "1"}}--log_samples{{end}}
         {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
 
   smoke-kivi:
@@ -76,8 +88,28 @@ tasks:
         --model_args pretrained=Qwen/Qwen2.5-VL-7B-Instruct,min_pixels={{.MIN_PIXELS}},max_pixels={{.MAX_PIXELS}},attn_implementation={{.ATTN_IMPLEMENTATION}},interleave_visuals=False,max_num_frames={{.FRAMES}}{{if .FPS}},fps={{.FPS}}{{end}},kv_cache=kivi,kivi_nbits={{.KIVI_NBITS}},kivi_q_group_size={{.KIVI_Q_GROUP_SIZE}},kivi_residual_length={{.KIVI_RESIDUAL_LENGTH}}
         --tasks {{.SMOKE_TASKS}}
         --batch_size 1
-        --limit 1
+        --limit {{.SMOKE_LIMIT}}
         --output_path {{.KIVI_EVAL_OUTPUT_PATH}}
+        {{if eq .LOG_SAMPLES "1"}}--log_samples{{end}}
+        {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
+
+  smoke-vidkv:
+    desc: Run a one-sample Qwen2.5-VL lmms-eval smoke test with VidKV cache.
+    cmds:
+      - >-
+        CUDA_VISIBLE_DEVICES={{.CUDA_VISIBLE_DEVICES}} HF_HOME={{.HF_HOME}} PYTHONNOUSERSITE=1 PYTHONPATH= LOG_VIDEO_GRID={{.LOG_VIDEO_GRID}}
+        FORCE_QWENVL_VIDEO_READER={{.VIDEO_READER}} STRICT_VIDEO_READER={{.STRICT_VIDEO_READER}} TORCHCODEC_NUM_THREADS={{.TORCHCODEC_NUM_THREADS}}
+        pixi run accelerate launch
+        --num_processes={{.GPUS}}
+        --main_process_port={{.PORT}}
+        -m lmms_eval
+        --model qwen2_5_vl
+        --model_args pretrained=Qwen/Qwen2.5-VL-7B-Instruct,min_pixels={{.MIN_PIXELS}},max_pixels={{.MAX_PIXELS}},attn_implementation={{.ATTN_IMPLEMENTATION}},interleave_visuals=False,max_num_frames={{.FRAMES}}{{if .FPS}},fps={{.FPS}}{{end}},kv_cache=vidkv,vidkv_nbits_key={{.VIDKV_NBITS_KEY}},vidkv_nbits_value={{.VIDKV_NBITS_VALUE}},vidkv_ternary_threshold={{.VIDKV_TERNARY_THRESHOLD}},vidkv_q_group_size={{.VIDKV_Q_GROUP_SIZE}},vidkv_residual_length={{.VIDKV_RESIDUAL_LENGTH}}
+        --tasks {{.SMOKE_TASKS}}
+        --batch_size 1
+        --limit {{.SMOKE_LIMIT}}
+        --output_path {{.VIDKV_EVAL_OUTPUT_PATH}}
+        {{if eq .LOG_SAMPLES "1"}}--log_samples{{end}}
         {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
 
   full:
@@ -95,6 +127,7 @@ tasks:
         --tasks {{.TASKS}}
         --batch_size 1
         --output_path {{.OUTPUT_PATH}}
+        {{if eq .LOG_SAMPLES "1"}}--log_samples{{end}}
         {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
 
   full-kivi:
@@ -112,7 +145,47 @@ tasks:
         --tasks {{.TASKS}}
         --batch_size 1
         --output_path {{.KIVI_EVAL_OUTPUT_PATH}}
+        {{if eq .LOG_SAMPLES "1"}}--log_samples{{end}}
         {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
+
+  full-vidkv:
+    desc: Run the full Qwen2.5-VL lmms-eval experiment with VidKV cache.
+    cmds:
+      - >-
+        CUDA_VISIBLE_DEVICES={{.CUDA_VISIBLE_DEVICES}} HF_HOME={{.HF_HOME}} PYTHONNOUSERSITE=1 PYTHONPATH= LOG_VIDEO_GRID={{.LOG_VIDEO_GRID}}
+        FORCE_QWENVL_VIDEO_READER={{.VIDEO_READER}} STRICT_VIDEO_READER={{.STRICT_VIDEO_READER}} TORCHCODEC_NUM_THREADS={{.TORCHCODEC_NUM_THREADS}}
+        pixi run accelerate launch
+        --num_processes={{.GPUS}}
+        --main_process_port={{.PORT}}
+        -m lmms_eval
+        --model qwen2_5_vl
+        --model_args pretrained=Qwen/Qwen2.5-VL-7B-Instruct,min_pixels={{.MIN_PIXELS}},max_pixels={{.MAX_PIXELS}},attn_implementation={{.ATTN_IMPLEMENTATION}},interleave_visuals=False,max_num_frames={{.FRAMES}}{{if .FPS}},fps={{.FPS}}{{end}},kv_cache=vidkv,vidkv_nbits_key={{.VIDKV_NBITS_KEY}},vidkv_nbits_value={{.VIDKV_NBITS_VALUE}},vidkv_ternary_threshold={{.VIDKV_TERNARY_THRESHOLD}},vidkv_q_group_size={{.VIDKV_Q_GROUP_SIZE}},vidkv_residual_length={{.VIDKV_RESIDUAL_LENGTH}}
+        --tasks {{.TASKS}}
+        --batch_size 1
+        --output_path {{.VIDKV_EVAL_OUTPUT_PATH}}
+        {{if eq .LOG_SAMPLES "1"}}--log_samples{{end}}
+        {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
+
+  quantize:
+    desc: Run the full KIVI and VidKV lmms-eval experiments back to back, both logged to W&B.
+    vars:
+      RUN_STAMP:
+        sh: date +%Y%m%d-%H%M%S
+      # W&B is on by default here: these are multi-hour runs and losing one to a forgotten
+      # flag is expensive. `wandb=`/`WANDB=` names the pair; otherwise fall back to a stamp.
+      QUANTIZE_RUN: '{{.wandb | default .WANDB | default (printf "quantize-%s" .RUN_STAMP)}}'
+    cmds:
+      # Each leg gets its own W&B run name, otherwise both land under one name and the two
+      # caches are indistinguishable in the dashboard. `wandb: ""` clears the lowercase var
+      # so the per-leg WANDB below wins.
+      - task: full-kivi
+        vars:
+          wandb: ""
+          WANDB: '{{.QUANTIZE_RUN}}-kivi'
+      - task: full-vidkv
+        vars:
+          wandb: ""
+          WANDB: '{{.QUANTIZE_RUN}}-vidkv'
 
   check-video-decode:
     desc: Preflight LongVideoBench video decoding with the same fixed backend used by evaluation.
@@ -151,3 +224,26 @@ tasks:
         --nbits {{.KIVI_NBITS}}
         --q-group-size {{.KIVI_Q_GROUP_SIZE}}
         --residual-length {{.KIVI_RESIDUAL_LENGTH}}
+
+  vidkv-cache-experiment:
+    desc: Run standalone VidKV cache correctness, bit-budget, and error-drift experiment.
+    cmds:
+      - >-
+        PYTHONNOUSERSITE=1 PYTHONPATH=
+        pixi run python -m py_compile
+        patches/vidkv_cache.py
+        scripts/run_vidkv_cache_experiment.py
+      - >-
+        PYTHONNOUSERSITE=1 PYTHONPATH=
+        pixi run python scripts/run_vidkv_cache_experiment.py
+        --output-path {{.VIDKV_OUTPUT_PATH}}
+        --seed {{.KIVI_SEED}}
+        --device {{.KIVI_DEVICE}}
+        --dtype {{.KIVI_DTYPE}}
+        --batch-size {{.KIVI_BATCH_SIZE}}
+        --head-dim {{.KIVI_HEAD_DIM}}
+        --nbits-key {{.VIDKV_NBITS_KEY}}
+        --nbits-value {{.VIDKV_NBITS_VALUE}}
+        --ternary-threshold {{.VIDKV_TERNARY_THRESHOLD}}
+        --q-group-size {{.VIDKV_Q_GROUP_SIZE}}
+        --residual-length {{.VIDKV_RESIDUAL_LENGTH}}

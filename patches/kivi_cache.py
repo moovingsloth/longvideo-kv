@@ -128,6 +128,17 @@ def _cat_nonempty(tensors: list[torch.Tensor | None], dim: int) -> torch.Tensor:
     return torch.cat(tensors, dim=dim)
 
 
+def _check_prefill_length(
+    keys: torch.Tensor, values: torch.Tensor, expected: int
+) -> None:
+    """Guard the prefill reconstruction: a silent length mismatch would corrupt attention."""
+    if keys.shape[-2] != expected or values.shape[-2] != expected:
+        raise ValueError(
+            "Prefill reconstruction lost tokens: expected "
+            f"{expected}, got {keys.shape[-2]} keys and {values.shape[-2]} values."
+        )
+
+
 class KiviLayer(QuantizedLayer):
     """
     KIVI-style KV cache layer for tensors shaped [batch, kv_heads, seq_len, head_dim].
@@ -267,10 +278,23 @@ class KiviLayer(QuantizedLayer):
 
         if not self.is_initialized:
             self.lazy_initialization(key_states, value_states)
-            self.cumulative_length = key_states.shape[-2]
+            prefill_length = key_states.shape[-2]
+            self.cumulative_length = prefill_length
+            if prefill_length == 0:
+                return key_states, value_states
             self._append_keys(key_states)
             self._append_values(value_states)
-            return key_states, value_states
+            # Prefill attention must see the quantized history too, otherwise the first
+            # generated token is bit-identical to fp16 and short-answer benchmarks measure
+            # nothing. After the appends, prefix + residual buffer reconstructs the whole
+            # prefill, so this is the same expression the decode path below uses, minus the
+            # trailing new-state term.
+            keys_to_return = _cat_nonempty([self._dequantized_key_prefix(), self.keys], dim=-2)
+            values_to_return = _cat_nonempty(
+                [self._dequantized_value_prefix(), self.values], dim=-2
+            )
+            _check_prefill_length(keys_to_return, values_to_return, prefill_length)
+            return keys_to_return, values_to_return
 
         key_prefix = self._dequantized_key_prefix()
         value_prefix = self._dequantized_value_prefix()

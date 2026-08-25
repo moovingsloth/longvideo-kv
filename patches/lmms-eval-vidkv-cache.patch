@@ -1,0 +1,90 @@
+diff --git a/lmms_eval/models/simple/qwen2_5_vl.py b/lmms_eval/models/simple/qwen2_5_vl.py
+index 13cde61..ce5c0bd 100644
+--- a/lmms_eval/models/simple/qwen2_5_vl.py
++++ b/lmms_eval/models/simple/qwen2_5_vl.py
+@@ -49,6 +49,11 @@ class Qwen2_5_VL(lmms):
+         kivi_nbits: int = 2,
+         kivi_q_group_size: int = 32,
+         kivi_residual_length: int = 128,
++        vidkv_nbits_key: float = 1.5,
++        vidkv_nbits_value: float = 1.58,
++        vidkv_q_group_size: int = 32,
++        vidkv_residual_length: int = 128,
++        vidkv_ternary_threshold: float = 0.7,
+         system_prompt: Optional[str] = "You are a helpful assistant.",
+         interleave_visuals: Optional[bool] = False,
+         reasoning_prompt: Optional[str] = None,
+@@ -91,8 +96,13 @@ class Qwen2_5_VL(lmms):
+         self.kivi_nbits = int(kivi_nbits)
+         self.kivi_q_group_size = int(kivi_q_group_size)
+         self.kivi_residual_length = int(kivi_residual_length)
+-        if self.kv_cache not in {None, "none", "dynamic", "kivi"}:
+-            raise ValueError(f"Unsupported kv_cache={kv_cache!r}; expected one of none,dynamic,kivi")
++        self.vidkv_nbits_key = float(vidkv_nbits_key)
++        self.vidkv_nbits_value = float(vidkv_nbits_value)
++        self.vidkv_q_group_size = int(vidkv_q_group_size)
++        self.vidkv_residual_length = int(vidkv_residual_length)
++        self.vidkv_ternary_threshold = float(vidkv_ternary_threshold)
++        if self.kv_cache not in {None, "none", "dynamic", "kivi", "vidkv"}:
++            raise ValueError(f"Unsupported kv_cache={kv_cache!r}; expected one of none,dynamic,kivi,vidkv")
+         if self.kv_cache == "kivi":
+             eval_logger.info(
+                 "Using KIVI KV cache: nbits={} q_group_size={} residual_length={}",
+@@ -100,6 +110,16 @@ class Qwen2_5_VL(lmms):
+                 self.kivi_q_group_size,
+                 self.kivi_residual_length,
+             )
++        if self.kv_cache == "vidkv":
++            eval_logger.info(
++                "Using VidKV KV cache: nbits_key={} nbits_value={} "
++                "q_group_size={} residual_length={} ternary_threshold={}",
++                self.vidkv_nbits_key,
++                self.vidkv_nbits_value,
++                self.vidkv_q_group_size,
++                self.vidkv_residual_length,
++                self.vidkv_ternary_threshold,
++            )
+         self._configure_video_reader()
+ 
+         if reasoning_prompt:
+@@ -137,19 +157,33 @@ class Qwen2_5_VL(lmms):
+     def _generation_cache_kwargs(self) -> dict:
+         if self.kv_cache in {None, "none", "dynamic"}:
+             return {}
+-        if self.kv_cache != "kivi":
++        if self.kv_cache not in {"kivi", "vidkv"}:
+             raise ValueError(f"Unsupported kv_cache={self.kv_cache!r}")
+         if not self.use_cache:
+-            raise ValueError("kv_cache=kivi requires use_cache=True")
++            raise ValueError(f"kv_cache={self.kv_cache} requires use_cache=True")
++
++        if self.kv_cache == "kivi":
++            from patches.kivi_cache import KiviCache
++
++            return {
++                "past_key_values": KiviCache(
++                    self.model.config,
++                    nbits=self.kivi_nbits,
++                    q_group_size=self.kivi_q_group_size,
++                    residual_length=self.kivi_residual_length,
++                )
++            }
+ 
+-        from patches.kivi_cache import KiviCache
++        from patches.vidkv_cache import VidkvCache
+ 
+         return {
+-            "past_key_values": KiviCache(
++            "past_key_values": VidkvCache(
+                 self.model.config,
+-                nbits=self.kivi_nbits,
+-                q_group_size=self.kivi_q_group_size,
+-                residual_length=self.kivi_residual_length,
++                nbits_key=self.vidkv_nbits_key,
++                nbits_value=self.vidkv_nbits_value,
++                q_group_size=self.vidkv_q_group_size,
++                residual_length=self.vidkv_residual_length,
++                ternary_threshold=self.vidkv_ternary_threshold,
+             )
+         }
+ 
