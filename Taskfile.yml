@@ -19,6 +19,18 @@ vars:
   HF_HOME: '{{.HF_HOME | default "$HOME/.cache/huggingface"}}'
   DECODE_LIMIT: '{{.DECODE_LIMIT | default ""}}'
   DECODE_REPEAT: '{{.DECODE_REPEAT | default "1"}}'
+  KIVI_OUTPUT_PATH: '{{.KIVI_OUTPUT_PATH | default "./results/kivi-cache-experiment.json"}}'
+  KIVI_EVAL_OUTPUT_PATH: '{{.KIVI_EVAL_OUTPUT_PATH | default "./results/kivi-lmms-eval"}}'
+  KIVI_DEVICE: '{{.KIVI_DEVICE | default "auto"}}'
+  KIVI_DTYPE: '{{.KIVI_DTYPE | default "float32"}}'
+  KIVI_SEED: '{{.KIVI_SEED | default "0"}}'
+  KIVI_BATCH_SIZE: '{{.KIVI_BATCH_SIZE | default "1"}}'
+  KIVI_KV_HEADS: '{{.KIVI_KV_HEADS | default "8"}}'
+  KIVI_HEAD_DIM: '{{.KIVI_HEAD_DIM | default "128"}}'
+  KIVI_LENGTHS: '{{.KIVI_LENGTHS | default "200,56,1"}}'
+  KIVI_NBITS: '{{.KIVI_NBITS | default "2"}}'
+  KIVI_Q_GROUP_SIZE: '{{.KIVI_Q_GROUP_SIZE | default "32"}}'
+  KIVI_RESIDUAL_LENGTH: '{{.KIVI_RESIDUAL_LENGTH | default "128"}}'
 
 tasks:
   setup:
@@ -50,6 +62,24 @@ tasks:
         --output_path {{.OUTPUT_PATH}}
         {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
 
+  smoke-kivi:
+    desc: Run a one-sample Qwen2.5-VL lmms-eval smoke test with KIVI cache.
+    cmds:
+      - >-
+        CUDA_VISIBLE_DEVICES={{.CUDA_VISIBLE_DEVICES}} HF_HOME={{.HF_HOME}} PYTHONNOUSERSITE=1 PYTHONPATH= LOG_VIDEO_GRID={{.LOG_VIDEO_GRID}}
+        FORCE_QWENVL_VIDEO_READER={{.VIDEO_READER}} STRICT_VIDEO_READER={{.STRICT_VIDEO_READER}} TORCHCODEC_NUM_THREADS={{.TORCHCODEC_NUM_THREADS}}
+        pixi run accelerate launch
+        --num_processes={{.GPUS}}
+        --main_process_port={{.PORT}}
+        -m lmms_eval
+        --model qwen2_5_vl
+        --model_args pretrained=Qwen/Qwen2.5-VL-7B-Instruct,min_pixels={{.MIN_PIXELS}},max_pixels={{.MAX_PIXELS}},attn_implementation={{.ATTN_IMPLEMENTATION}},interleave_visuals=False,max_num_frames={{.FRAMES}}{{if .FPS}},fps={{.FPS}}{{end}},kv_cache=kivi,kivi_nbits={{.KIVI_NBITS}},kivi_q_group_size={{.KIVI_Q_GROUP_SIZE}},kivi_residual_length={{.KIVI_RESIDUAL_LENGTH}}
+        --tasks {{.SMOKE_TASKS}}
+        --batch_size 1
+        --limit 1
+        --output_path {{.KIVI_EVAL_OUTPUT_PATH}}
+        {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
+
   full:
     desc: Run the full Qwen2.5-VL lmms-eval experiment.
     cmds:
@@ -67,6 +97,23 @@ tasks:
         --output_path {{.OUTPUT_PATH}}
         {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
 
+  full-kivi:
+    desc: Run the full Qwen2.5-VL lmms-eval experiment with KIVI cache.
+    cmds:
+      - >-
+        CUDA_VISIBLE_DEVICES={{.CUDA_VISIBLE_DEVICES}} HF_HOME={{.HF_HOME}} PYTHONNOUSERSITE=1 PYTHONPATH= LOG_VIDEO_GRID={{.LOG_VIDEO_GRID}}
+        FORCE_QWENVL_VIDEO_READER={{.VIDEO_READER}} STRICT_VIDEO_READER={{.STRICT_VIDEO_READER}} TORCHCODEC_NUM_THREADS={{.TORCHCODEC_NUM_THREADS}}
+        pixi run accelerate launch
+        --num_processes={{.GPUS}}
+        --main_process_port={{.PORT}}
+        -m lmms_eval
+        --model qwen2_5_vl
+        --model_args pretrained=Qwen/Qwen2.5-VL-7B-Instruct,min_pixels={{.MIN_PIXELS}},max_pixels={{.MAX_PIXELS}},attn_implementation={{.ATTN_IMPLEMENTATION}},interleave_visuals=False,max_num_frames={{.FRAMES}}{{if .FPS}},fps={{.FPS}}{{end}},kv_cache=kivi,kivi_nbits={{.KIVI_NBITS}},kivi_q_group_size={{.KIVI_Q_GROUP_SIZE}},kivi_residual_length={{.KIVI_RESIDUAL_LENGTH}}
+        --tasks {{.TASKS}}
+        --batch_size 1
+        --output_path {{.KIVI_EVAL_OUTPUT_PATH}}
+        {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
+
   check-video-decode:
     desc: Preflight LongVideoBench video decoding with the same fixed backend used by evaluation.
     cmds:
@@ -81,3 +128,26 @@ tasks:
         --output-path {{.OUTPUT_PATH}}/video-decode-preflight.jsonl
         {{if .FPS}}--fps {{.FPS}}{{end}}
         {{if .DECODE_LIMIT}}--limit {{.DECODE_LIMIT}}{{end}}
+
+  kivi-cache-experiment:
+    desc: Run standalone KIVI cache correctness, split, and storage experiment.
+    cmds:
+      - >-
+        PYTHONNOUSERSITE=1 PYTHONPATH=
+        pixi run python -m py_compile
+        patches/kivi_cache.py
+        scripts/run_kivi_cache_experiment.py
+      - >-
+        PYTHONNOUSERSITE=1 PYTHONPATH=
+        pixi run python scripts/run_kivi_cache_experiment.py
+        --output-path {{.KIVI_OUTPUT_PATH}}
+        --seed {{.KIVI_SEED}}
+        --device {{.KIVI_DEVICE}}
+        --dtype {{.KIVI_DTYPE}}
+        --batch-size {{.KIVI_BATCH_SIZE}}
+        --kv-heads {{.KIVI_KV_HEADS}}
+        --head-dim {{.KIVI_HEAD_DIM}}
+        --lengths {{.KIVI_LENGTHS}}
+        --nbits {{.KIVI_NBITS}}
+        --q-group-size {{.KIVI_Q_GROUP_SIZE}}
+        --residual-length {{.KIVI_RESIDUAL_LENGTH}}

@@ -20,3 +20,22 @@ Fixed to **Qwen2.5-VL-7B-Instruct**. Do not swap models without updating this fi
   - `fp16_cache.py` — baseline, unquantized
   - `kivi_cache.py` — KIVI quantization
   - `vidkv_cache.py` — VidKV quantization
+
+## KIVI Cache Experiment
+
+Run the standalone KIVI cache split, reconstruction, and storage experiment:
+
+```bash
+task kivi-cache-experiment
+```
+
+The default output is `results/kivi-cache-experiment.json`.
+
+Run lmms-eval with KIVI cache enabled:
+
+```bash
+task smoke-kivi
+task full-kivi
+```
+
+These tasks pass `kv_cache=kivi` to the patched Qwen2.5-VL lmms-eval wrapper.
