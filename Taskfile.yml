@@ -1,8 +1,8 @@
 version: "3"
 
 vars:
-  TASKS: '{{.TASKS | default "longvideobench_val_v"}}'
-  SMOKE_TASKS: '{{.SMOKE_TASKS | default "mmstar"}}'
+  TASKS: '{{.TASKS | default "mlvu_dev"}}'
+  SMOKE_TASKS: '{{.SMOKE_TASKS | default "mlvu_dev"}}'
   SMOKE_LIMIT: '{{.SMOKE_LIMIT | default "1"}}'
   FRAMES: '{{.FRAMES | default "48"}}'
   MIN_PIXELS: '{{.MIN_PIXELS | default "200704"}}'
@@ -16,13 +16,13 @@ vars:
   GPUS: '{{.GPUS | default "1"}}'
   PORT: '{{.PORT | default "12346"}}'
   OUTPUT_PATH: '{{.OUTPUT_PATH | default "./results"}}'
+  WANDB_ENTITY: '{{.WANDB_ENTITY | default "dlehddnjs245-kyung-hee-university"}}'
+  WANDB_PROJECT: '{{.WANDB_PROJECT | default "mllm-quant"}}'
   # On by default: without per-sample logs there is no way to tell a cache that changed the
   # generations from one that silently did nothing. Set LOG_SAMPLES=0 to opt out.
   LOG_SAMPLES: '{{.LOG_SAMPLES | default "1"}}'
   CUDA_VISIBLE_DEVICES: '{{.CUDA_VISIBLE_DEVICES | default "0"}}'
   HF_HOME: '{{.HF_HOME | default "$HOME/.cache/huggingface"}}'
-  DECODE_LIMIT: '{{.DECODE_LIMIT | default ""}}'
-  DECODE_REPEAT: '{{.DECODE_REPEAT | default "1"}}'
   KIVI_OUTPUT_PATH: '{{.KIVI_OUTPUT_PATH | default "./results/kivi-cache-experiment.json"}}'
   KIVI_EVAL_OUTPUT_PATH: '{{.KIVI_EVAL_OUTPUT_PATH | default "./results/kivi-lmms-eval"}}'
   KIVI_DEVICE: '{{.KIVI_DEVICE | default "auto"}}'
@@ -72,7 +72,7 @@ tasks:
         --limit {{.SMOKE_LIMIT}}
         --output_path {{.OUTPUT_PATH}}
         {{if eq .LOG_SAMPLES "1"}}--log_samples{{end}}
-        {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
+        {{if .wandb}}--wandb_args 'entity={{.WANDB_ENTITY}},project={{.WANDB_PROJECT}},name={{.wandb}}'{{else if .WANDB}}--wandb_args 'entity={{.WANDB_ENTITY}},project={{.WANDB_PROJECT}},name={{.WANDB}}'{{end}}
 
   smoke-kivi:
     desc: Run a one-sample Qwen2.5-VL lmms-eval smoke test with KIVI cache.
@@ -91,7 +91,7 @@ tasks:
         --limit {{.SMOKE_LIMIT}}
         --output_path {{.KIVI_EVAL_OUTPUT_PATH}}
         {{if eq .LOG_SAMPLES "1"}}--log_samples{{end}}
-        {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
+        {{if .wandb}}--wandb_args 'entity={{.WANDB_ENTITY}},project={{.WANDB_PROJECT}},name={{.wandb}}'{{else if .WANDB}}--wandb_args 'entity={{.WANDB_ENTITY}},project={{.WANDB_PROJECT}},name={{.WANDB}}'{{end}}
 
   smoke-vidkv:
     desc: Run a one-sample Qwen2.5-VL lmms-eval smoke test with VidKV cache.
@@ -110,10 +110,14 @@ tasks:
         --limit {{.SMOKE_LIMIT}}
         --output_path {{.VIDKV_EVAL_OUTPUT_PATH}}
         {{if eq .LOG_SAMPLES "1"}}--log_samples{{end}}
-        {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
+        {{if .wandb}}--wandb_args 'entity={{.WANDB_ENTITY}},project={{.WANDB_PROJECT}},name={{.wandb}}'{{else if .WANDB}}--wandb_args 'entity={{.WANDB_ENTITY}},project={{.WANDB_PROJECT}},name={{.WANDB}}'{{end}}
 
   full:
     desc: Run the full Qwen2.5-VL lmms-eval experiment.
+    vars:
+      RUN_STAMP:
+        sh: date +%Y%m%d-%H%M%S
+      FULL_WANDB_RUN: '{{.wandb | default .WANDB | default (printf "full-%s" .RUN_STAMP)}}'
     cmds:
       - >-
         CUDA_VISIBLE_DEVICES={{.CUDA_VISIBLE_DEVICES}} HF_HOME={{.HF_HOME}} PYTHONNOUSERSITE=1 PYTHONPATH= LOG_VIDEO_GRID={{.LOG_VIDEO_GRID}}
@@ -128,7 +132,7 @@ tasks:
         --batch_size 1
         --output_path {{.OUTPUT_PATH}}
         {{if eq .LOG_SAMPLES "1"}}--log_samples{{end}}
-        {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
+        --wandb_args 'entity={{.WANDB_ENTITY}},project={{.WANDB_PROJECT}},name={{.FULL_WANDB_RUN}}'
 
   full-kivi:
     desc: Run the full Qwen2.5-VL lmms-eval experiment with KIVI cache.
@@ -146,7 +150,7 @@ tasks:
         --batch_size 1
         --output_path {{.KIVI_EVAL_OUTPUT_PATH}}
         {{if eq .LOG_SAMPLES "1"}}--log_samples{{end}}
-        {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
+        {{if .wandb}}--wandb_args 'entity={{.WANDB_ENTITY}},project={{.WANDB_PROJECT}},name={{.wandb}}'{{else if .WANDB}}--wandb_args 'entity={{.WANDB_ENTITY}},project={{.WANDB_PROJECT}},name={{.WANDB}}'{{end}}
 
   full-vidkv:
     desc: Run the full Qwen2.5-VL lmms-eval experiment with VidKV cache.
@@ -164,7 +168,27 @@ tasks:
         --batch_size 1
         --output_path {{.VIDKV_EVAL_OUTPUT_PATH}}
         {{if eq .LOG_SAMPLES "1"}}--log_samples{{end}}
-        {{if .wandb}}--wandb_args 'project=mllm-quant,name={{.wandb}}'{{else if .WANDB}}--wandb_args 'project=mllm-quant,name={{.WANDB}}'{{end}}
+        {{if .wandb}}--wandb_args 'entity={{.WANDB_ENTITY}},project={{.WANDB_PROJECT}},name={{.wandb}}'{{else if .WANDB}}--wandb_args 'entity={{.WANDB_ENTITY}},project={{.WANDB_PROJECT}},name={{.WANDB}}'{{end}}
+
+  run:
+    desc: Run the full FP16, KIVI, and VidKV lmms-eval experiments sequentially.
+    vars:
+      RUN_STAMP:
+        sh: date +%Y%m%d-%H%M%S
+      RUN_NAME: '{{.wandb | default .WANDB | default (printf "run-%s" .RUN_STAMP)}}'
+    cmds:
+      - task: full
+        vars:
+          wandb: ""
+          WANDB: '{{.RUN_NAME}}-fp16'
+      - task: full-kivi
+        vars:
+          wandb: ""
+          WANDB: '{{.RUN_NAME}}-kivi'
+      - task: full-vidkv
+        vars:
+          wandb: ""
+          WANDB: '{{.RUN_NAME}}-vidkv'
 
   quantize:
     desc: Run the full KIVI and VidKV lmms-eval experiments back to back, both logged to W&B.
@@ -186,21 +210,6 @@ tasks:
         vars:
           wandb: ""
           WANDB: '{{.QUANTIZE_RUN}}-vidkv'
-
-  check-video-decode:
-    desc: Preflight LongVideoBench video decoding with the same fixed backend used by evaluation.
-    cmds:
-      - >-
-        HF_HOME={{.HF_HOME}} PYTHONNOUSERSITE=1 PYTHONPATH=
-        FORCE_QWENVL_VIDEO_READER={{.VIDEO_READER}} STRICT_VIDEO_READER={{.STRICT_VIDEO_READER}} TORCHCODEC_NUM_THREADS={{.TORCHCODEC_NUM_THREADS}}
-        pixi run python scripts/check_video_decode.py
-        --frames {{.FRAMES}}
-        --min-pixels {{.MIN_PIXELS}}
-        --max-pixels {{.MAX_PIXELS}}
-        --repeat {{.DECODE_REPEAT}}
-        --output-path {{.OUTPUT_PATH}}/video-decode-preflight.jsonl
-        {{if .FPS}}--fps {{.FPS}}{{end}}
-        {{if .DECODE_LIMIT}}--limit {{.DECODE_LIMIT}}{{end}}
 
   kivi-cache-experiment:
     desc: Run standalone KIVI cache correctness, split, and storage experiment.

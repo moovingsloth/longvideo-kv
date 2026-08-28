@@ -1,5 +1,18 @@
+diff --git a/lmms_eval/models/chat/qwen2_5_vl.py b/lmms_eval/models/chat/qwen2_5_vl.py
+index bea4cb8..d56a5ac 100644
+--- a/lmms_eval/models/chat/qwen2_5_vl.py
++++ b/lmms_eval/models/chat/qwen2_5_vl.py
+@@ -131,7 +131,7 @@ class Qwen2_5_VL(Qwen2_5_VLSimple):
+                 max_new_tokens=current_gen_kwargs["max_new_tokens"],
+                 top_k=current_gen_kwargs.get("top_k", None),
+                 use_cache=self.use_cache,
+-                **self._generation_cache_kwargs(),
++                **self._generation_cache_kwargs(inputs),
+             )
+             end_time = time.time()
+ 
 diff --git a/lmms_eval/models/simple/qwen2_5_vl.py b/lmms_eval/models/simple/qwen2_5_vl.py
-index 13cde61..ce5c0bd 100644
+index 13cde61..819c4eb 100644
 --- a/lmms_eval/models/simple/qwen2_5_vl.py
 +++ b/lmms_eval/models/simple/qwen2_5_vl.py
 @@ -49,6 +49,11 @@ class Qwen2_5_VL(lmms):
@@ -47,8 +60,20 @@ index 13cde61..ce5c0bd 100644
          self._configure_video_reader()
  
          if reasoning_prompt:
-@@ -137,19 +157,33 @@ class Qwen2_5_VL(lmms):
-     def _generation_cache_kwargs(self) -> dict:
+@@ -134,22 +154,45 @@ class Qwen2_5_VL(lmms):
+             self._rank = 0
+             self._world_size = 1
+ 
+-    def _generation_cache_kwargs(self) -> dict:
++    def _video_token_mask(self, inputs) -> torch.Tensor:
++        if inputs is None or "input_ids" not in inputs:
++            raise ValueError("kv_cache=vidkv requires input_ids to identify video tokens.")
++        video_token_id = getattr(self.model.config, "video_token_id", None)
++        if video_token_id is None:
++            raise ValueError("kv_cache=vidkv requires model.config.video_token_id.")
++        return inputs["input_ids"] == video_token_id
++
++    def _generation_cache_kwargs(self, inputs=None) -> dict:
          if self.kv_cache in {None, "none", "dynamic"}:
              return {}
 -        if self.kv_cache != "kivi":
@@ -85,6 +110,25 @@ index 13cde61..ce5c0bd 100644
 +                q_group_size=self.vidkv_q_group_size,
 +                residual_length=self.vidkv_residual_length,
 +                ternary_threshold=self.vidkv_ternary_threshold,
++                video_token_mask=self._video_token_mask(inputs),
              )
          }
  
+@@ -478,7 +521,7 @@ class Qwen2_5_VL(lmms):
+                 num_beams=current_gen_kwargs["num_beams"],
+                 max_new_tokens=current_gen_kwargs["max_new_tokens"],
+                 use_cache=self.use_cache,
+-                **self._generation_cache_kwargs(),
++                **self._generation_cache_kwargs(inputs),
+             )
+ 
+             generated_ids_trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, cont)]
+@@ -681,7 +724,7 @@ class Qwen2_5_VL(lmms):
+                     num_beams=current_gen_kwargs["num_beams"],
+                     max_new_tokens=current_gen_kwargs["max_new_tokens"],
+                     use_cache=self.use_cache,
+-                    **self._generation_cache_kwargs(),
++                    **self._generation_cache_kwargs(inputs),
+                 )
+ 
+                 generated_ids_trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, cont)]

@@ -75,28 +75,28 @@ class _PackedVidkvTensor:
     q_group_size: int
     mode: str
 
-    def index_select_batch(self, indices: torch.Tensor) -> "_PackedVidkvTensor":
+    def index_select_batch(self, indices: torch.Tensor) -> _PackedVidkvTensor:
         return self._replace_batch(
             self.codes.index_select(0, indices.to(self.codes.device)),
             self.scale.index_select(0, indices.to(self.scale.device)),
             self.minimum.index_select(0, indices.to(self.minimum.device)),
         )
 
-    def repeat_interleave_batch(self, repeats: int) -> "_PackedVidkvTensor":
+    def repeat_interleave_batch(self, repeats: int) -> _PackedVidkvTensor:
         return self._replace_batch(
             self.codes.repeat_interleave(repeats, dim=0),
             self.scale.repeat_interleave(repeats, dim=0),
             self.minimum.repeat_interleave(repeats, dim=0),
         )
 
-    def select_batch(self, indices: torch.Tensor) -> "_PackedVidkvTensor":
+    def select_batch(self, indices: torch.Tensor) -> _PackedVidkvTensor:
         return self._replace_batch(
             self.codes[indices.to(self.codes.device), ...],
             self.scale[indices.to(self.scale.device), ...],
             self.minimum[indices.to(self.minimum.device), ...],
         )
 
-    def to(self, device: torch.device | str) -> "_PackedVidkvTensor":
+    def to(self, device: torch.device | str) -> _PackedVidkvTensor:
         return _PackedVidkvTensor(
             codes=self.codes.to(device, non_blocking=True),
             scale=self.scale.to(device, non_blocking=True),
@@ -113,7 +113,7 @@ class _PackedVidkvTensor:
         codes: torch.Tensor,
         scale: torch.Tensor,
         minimum: torch.Tensor,
-    ) -> "_PackedVidkvTensor":
+    ) -> _PackedVidkvTensor:
         return _PackedVidkvTensor(
             codes=codes,
             scale=scale,
@@ -132,28 +132,28 @@ class _FftVidkvTensor:
     fft_shape: tuple[int, ...]
     output_dtype: torch.dtype
 
-    def index_select_batch(self, indices: torch.Tensor) -> "_FftVidkvTensor":
+    def index_select_batch(self, indices: torch.Tensor) -> _FftVidkvTensor:
         return _FftVidkvTensor(
             self.packed.index_select_batch(indices),
             (indices.numel(), *self.fft_shape[1:]),
             self.output_dtype,
         )
 
-    def repeat_interleave_batch(self, repeats: int) -> "_FftVidkvTensor":
+    def repeat_interleave_batch(self, repeats: int) -> _FftVidkvTensor:
         return _FftVidkvTensor(
             self.packed.repeat_interleave_batch(repeats),
             (self.fft_shape[0] * repeats, *self.fft_shape[1:]),
             self.output_dtype,
         )
 
-    def select_batch(self, indices: torch.Tensor) -> "_FftVidkvTensor":
+    def select_batch(self, indices: torch.Tensor) -> _FftVidkvTensor:
         return _FftVidkvTensor(
             self.packed.select_batch(indices),
             (indices.numel(), *self.fft_shape[1:]),
             self.output_dtype,
         )
 
-    def to(self, device: torch.device | str) -> "_FftVidkvTensor":
+    def to(self, device: torch.device | str) -> _FftVidkvTensor:
         return _FftVidkvTensor(self.packed.to(device), self.fft_shape, self.output_dtype)
 
 
@@ -166,7 +166,7 @@ class _DynamicKeyTensor:
     original_shape: tuple[int, ...]
     output_dtype: torch.dtype
 
-    def index_select_batch(self, indices: torch.Tensor) -> "_DynamicKeyTensor":
+    def index_select_batch(self, indices: torch.Tensor) -> _DynamicKeyTensor:
         return _DynamicKeyTensor(
             None if self.q_easy is None else self.q_easy.index_select_batch(indices),
             None if self.q_difficult is None else self.q_difficult.index_select_batch(indices),
@@ -176,7 +176,7 @@ class _DynamicKeyTensor:
             self.output_dtype,
         )
 
-    def repeat_interleave_batch(self, repeats: int) -> "_DynamicKeyTensor":
+    def repeat_interleave_batch(self, repeats: int) -> _DynamicKeyTensor:
         return _DynamicKeyTensor(
             None if self.q_easy is None else self.q_easy.repeat_interleave_batch(repeats),
             None if self.q_difficult is None else self.q_difficult.repeat_interleave_batch(repeats),
@@ -186,7 +186,7 @@ class _DynamicKeyTensor:
             self.output_dtype,
         )
 
-    def select_batch(self, indices: torch.Tensor) -> "_DynamicKeyTensor":
+    def select_batch(self, indices: torch.Tensor) -> _DynamicKeyTensor:
         return _DynamicKeyTensor(
             None if self.q_easy is None else self.q_easy.select_batch(indices),
             None if self.q_difficult is None else self.q_difficult.select_batch(indices),
@@ -196,7 +196,7 @@ class _DynamicKeyTensor:
             self.output_dtype,
         )
 
-    def to(self, device: torch.device | str) -> "_DynamicKeyTensor":
+    def to(self, device: torch.device | str) -> _DynamicKeyTensor:
         return _DynamicKeyTensor(
             None if self.q_easy is None else self.q_easy.to(device),
             None if self.q_difficult is None else self.q_difficult.to(device),
@@ -205,6 +205,12 @@ class _DynamicKeyTensor:
             self.original_shape,
             self.output_dtype,
         )
+
+
+@dataclass
+class _VidkvSegment:
+    quantized: bool
+    length: int
 
 
 class VidkvLayer(QuantizedLayer):
@@ -221,6 +227,10 @@ class VidkvLayer(QuantizedLayer):
     Storage is append-only: once a chunk of tokens is quantized it is never
     re-quantized, so decoding does not compound quantization error.
 
+    When a video_token_mask is supplied, only tokens marked as video are quantized.
+    Text/control tokens are stored as full-precision ordered segments and generated
+    assistant tokens remain full precision.
+
     Caveat on the advertised widths: `nbits_key=1.5` is honest (measured 1.52
     bits/value at head_dim=128), but `nbits_value=1.58` is stored at 2 bits/value
     because ternary codes are packed two-per-uint8. Reaching a true 1.58 would
@@ -236,6 +246,7 @@ class VidkvLayer(QuantizedLayer):
         q_group_size: int = 32,
         residual_length: int = 128,
         ternary_threshold: float = 0.7,
+        video_token_mask: torch.Tensor | None = None,
     ):
         # `nbits` is the widest code width we ever pack (the 2-bit anomalous-channel and
         # ternary paths); the real per-tensor widths live in nbits_key/nbits_value.
@@ -272,8 +283,18 @@ class VidkvLayer(QuantizedLayer):
         self.high_nbits = 2
         self.difficult_ratio = nbits_key - 1 if nbits_key == 1.5 else 0
         self.dynamic_key_quantize = nbits_key == 1.5
+        self.video_token_mask = video_token_mask
+        if self.video_token_mask is not None:
+            if self.video_token_mask.ndim == 1:
+                self.video_token_mask = self.video_token_mask.unsqueeze(0)
+            if self.video_token_mask.ndim != 2:
+                raise ValueError(
+                    "`video_token_mask` must be shaped [batch, seq_len] or [seq_len]."
+                )
+            self.video_token_mask = self.video_token_mask.to(dtype=torch.bool)
         self._quantized_keys: list[_PackedVidkvTensor | _DynamicKeyTensor | _FftVidkvTensor] = []
         self._quantized_values: list[_PackedVidkvTensor] = []
+        self._segments: list[_VidkvSegment] = []
 
     def _quantize(
         self, tensor: torch.Tensor, axis: int, bits: float = 2
@@ -483,6 +504,141 @@ class VidkvLayer(QuantizedLayer):
         chunks = [self._dequantize_value(chunk, dtype=dtype) for chunk in self._quantized_values]
         return torch.cat(chunks, dim=-2) if len(chunks) > 1 else chunks[0]
 
+    def _video_mask_slice(
+        self,
+        start: int,
+        length: int,
+        batch_size: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        if self.video_token_mask is None:
+            raise ValueError("Cannot slice a missing video token mask.")
+        if self.video_token_mask.shape[0] != batch_size:
+            raise ValueError(
+                "`video_token_mask` batch size does not match key/value states: "
+                f"{self.video_token_mask.shape[0]} != {batch_size}."
+            )
+
+        end = start + length
+        source = self.video_token_mask
+        if start >= source.shape[-1]:
+            return torch.zeros(batch_size, length, dtype=torch.bool, device=device)
+
+        sliced = source[:, start : min(end, source.shape[-1])].to(device=device)
+        if sliced.shape[-1] == length:
+            return sliced
+
+        padding = torch.zeros(
+            batch_size,
+            length - sliced.shape[-1],
+            dtype=torch.bool,
+            device=device,
+        )
+        return torch.cat([sliced, padding], dim=-1)
+
+    def _append_fp_segment(self, key_states: torch.Tensor, value_states: torch.Tensor) -> None:
+        length = key_states.shape[-2]
+        if length == 0:
+            return
+        self.keys = _cat_nonempty([self.keys, key_states], dim=-2)
+        self.values = _cat_nonempty([self.values, value_states], dim=-2)
+        if len(self._segments) > 0 and not self._segments[-1].quantized:
+            self._segments[-1].length += length
+        else:
+            self._segments.append(_VidkvSegment(quantized=False, length=length))
+
+    def _append_quantized_segment(
+        self,
+        key_states: torch.Tensor,
+        value_states: torch.Tensor,
+    ) -> None:
+        length = key_states.shape[-2]
+        if length == 0:
+            return
+        self._quantized_keys.append(self._quantize_key(key_states))
+        self._quantized_values.append(self._quantize_value(value_states))
+        self._segments.append(_VidkvSegment(quantized=True, length=length))
+
+    def _append_video_only(
+        self,
+        key_states: torch.Tensor,
+        value_states: torch.Tensor,
+        video_mask: torch.Tensor,
+    ) -> None:
+        if video_mask.shape != (key_states.shape[0], key_states.shape[-2]):
+            raise ValueError(
+                "`video_token_mask` slice must match [batch, seq_len], got "
+                f"{tuple(video_mask.shape)} for key/value shape {tuple(key_states.shape)}."
+            )
+
+        # A single ordered segment layout is shared across the batch. For batch_size > 1,
+        # only positions that are video tokens for every row are quantized; mixed positions
+        # stay full precision so text/control tokens are never quantized.
+        quantize_positions = video_mask[0] if video_mask.shape[0] == 1 else video_mask.all(dim=0)
+        if quantize_positions.numel() == 0:
+            return
+
+        start = 0
+        while start < quantize_positions.numel():
+            is_video = bool(quantize_positions[start].item())
+            end = start + 1
+            while (
+                end < quantize_positions.numel()
+                and bool(quantize_positions[end].item()) == is_video
+            ):
+                end += 1
+
+            segment_keys = key_states[..., start:end, :]
+            segment_values = value_states[..., start:end, :]
+            if is_video:
+                self._append_quantized_segment(segment_keys, segment_values)
+            else:
+                self._append_fp_segment(segment_keys, segment_values)
+            start = end
+
+    def _reconstruct_segments(
+        self,
+        key_dtype: torch.dtype,
+        value_dtype: torch.dtype,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if len(self._segments) == 0:
+            raise ValueError("Expected at least one VidKV cache segment.")
+
+        key_chunks = []
+        value_chunks = []
+        fp_offset = 0
+        q_offset = 0
+        for segment in self._segments:
+            if segment.quantized:
+                key_chunk = self._dequantize_key(self._quantized_keys[q_offset], dtype=key_dtype)
+                value_chunk = self._dequantize_value(
+                    self._quantized_values[q_offset], dtype=value_dtype
+                )
+                q_offset += 1
+            else:
+                end = fp_offset + segment.length
+                key_chunk = self.keys[..., fp_offset:end, :]
+                value_chunk = self.values[..., fp_offset:end, :]
+                fp_offset = end
+
+            if key_chunk.shape[-2] != segment.length or value_chunk.shape[-2] != segment.length:
+                raise ValueError(
+                    "VidKV segment length mismatch: expected "
+                    f"{segment.length}, got {key_chunk.shape[-2]} keys and "
+                    f"{value_chunk.shape[-2]} values."
+                )
+            key_chunks.append(key_chunk)
+            value_chunks.append(value_chunk)
+
+        if fp_offset != self.keys.shape[-2]:
+            raise ValueError(
+                f"Unused full-precision VidKV cache tokens: {self.keys.shape[-2] - fp_offset}."
+            )
+        if q_offset != len(self._quantized_keys) or q_offset != len(self._quantized_values):
+            raise ValueError("Unused quantized VidKV cache chunks.")
+
+        return _cat_nonempty(key_chunks, dim=-2), _cat_nonempty(value_chunks, dim=-2)
+
     def _append(self, key_states: torch.Tensor, value_states: torch.Tensor) -> None:
         """
         Append-only flush, mirroring KiviLayer._append_keys/_append_values.
@@ -528,6 +684,20 @@ class VidkvLayer(QuantizedLayer):
             self.cumulative_length = prefill_length
             if prefill_length == 0:
                 return key_states, value_states
+            if self.video_token_mask is not None:
+                video_mask = self._video_mask_slice(
+                    start=0,
+                    length=prefill_length,
+                    batch_size=key_states.shape[0],
+                    device=key_states.device,
+                )
+                self._append_video_only(key_states, value_states, video_mask)
+                keys_to_return, values_to_return = self._reconstruct_segments(
+                    key_dtype=key_states.dtype,
+                    value_dtype=value_states.dtype,
+                )
+                _check_prefill_length(keys_to_return, values_to_return, prefill_length)
+                return keys_to_return, values_to_return
             self._append(key_states, value_states)
             # Prefill attention must see the quantized history too, otherwise the first
             # generated token is bit-identical to fp16 and short-answer benchmarks measure
@@ -542,6 +712,21 @@ class VidkvLayer(QuantizedLayer):
             )
             _check_prefill_length(keys_to_return, values_to_return, prefill_length)
             return keys_to_return, values_to_return
+
+        if self.video_token_mask is not None:
+            start = self.cumulative_length
+            self.cumulative_length += key_states.shape[-2]
+            video_mask = self._video_mask_slice(
+                start=start,
+                length=key_states.shape[-2],
+                batch_size=key_states.shape[0],
+                device=key_states.device,
+            )
+            self._append_video_only(key_states, value_states, video_mask)
+            return self._reconstruct_segments(
+                key_dtype=key_states.dtype,
+                value_dtype=value_states.dtype,
+            )
 
         key_prefix = self._dequantized_key_prefix(dtype=key_states.dtype)
         value_prefix = self._dequantized_value_prefix(dtype=value_states.dtype)
@@ -564,6 +749,7 @@ class VidkvLayer(QuantizedLayer):
     def reset(self) -> None:
         self._quantized_keys = []
         self._quantized_values = []
+        self._segments = []
         self.cumulative_length = 0
         if self.is_initialized:
             self.keys = torch.tensor([], dtype=self.dtype, device=self.device)
@@ -580,6 +766,11 @@ class VidkvLayer(QuantizedLayer):
         self._quantized_values = [
             chunk.index_select_batch(beam_idx) for chunk in self._quantized_values
         ]
+        if self.video_token_mask is not None:
+            self.video_token_mask = self.video_token_mask.index_select(
+                0,
+                beam_idx.to(self.video_token_mask.device),
+            )
 
     def crop(self, tokens_to_remove: int) -> None:
         if tokens_to_remove > 0:
@@ -596,6 +787,12 @@ class VidkvLayer(QuantizedLayer):
         self.keys = self.keys[..., :-tokens_to_remove, :]
         self.values = self.values[..., :-tokens_to_remove, :]
         self.cumulative_length = max(self.cumulative_length - tokens_to_remove, 0)
+        if self._segments:
+            self._segments = (
+                []
+                if self.keys.shape[-2] == 0
+                else [_VidkvSegment(quantized=False, length=self.keys.shape[-2])]
+            )
 
     def batch_repeat_interleave(self, repeats: int) -> None:
         if self.get_seq_length() == 0:
@@ -608,6 +805,8 @@ class VidkvLayer(QuantizedLayer):
         self._quantized_values = [
             chunk.repeat_interleave_batch(repeats) for chunk in self._quantized_values
         ]
+        if self.video_token_mask is not None:
+            self.video_token_mask = self.video_token_mask.repeat_interleave(repeats, dim=0)
 
     def batch_select_indices(self, indices: torch.Tensor) -> None:
         if self.get_seq_length() == 0:
@@ -616,6 +815,11 @@ class VidkvLayer(QuantizedLayer):
         self.values = self.values[indices.to(self.values.device), ...]
         self._quantized_keys = [chunk.select_batch(indices) for chunk in self._quantized_keys]
         self._quantized_values = [chunk.select_batch(indices) for chunk in self._quantized_values]
+        if self.video_token_mask is not None:
+            self.video_token_mask = self.video_token_mask[
+                indices.to(self.video_token_mask.device),
+                ...,
+            ]
 
     def offload(self) -> None:
         if not self.is_initialized:
@@ -624,6 +828,8 @@ class VidkvLayer(QuantizedLayer):
         self.values = self.values.to("cpu", non_blocking=True)
         self._quantized_keys = [chunk.to("cpu") for chunk in self._quantized_keys]
         self._quantized_values = [chunk.to("cpu") for chunk in self._quantized_values]
+        if self.video_token_mask is not None:
+            self.video_token_mask = self.video_token_mask.to("cpu", non_blocking=True)
 
     def prefetch(self) -> None:
         if not self.is_initialized or self.keys.device == self.device:
@@ -632,6 +838,8 @@ class VidkvLayer(QuantizedLayer):
         self.values = self.values.to(self.device, non_blocking=True)
         self._quantized_keys = [chunk.to(self.device) for chunk in self._quantized_keys]
         self._quantized_values = [chunk.to(self.device) for chunk in self._quantized_values]
+        if self.video_token_mask is not None:
+            self.video_token_mask = self.video_token_mask.to(self.device, non_blocking=True)
 
 
 class VidkvCache(Cache):
@@ -645,6 +853,7 @@ class VidkvCache(Cache):
         q_group_size: int = 32,
         residual_length: int = 128,
         ternary_threshold: float = 0.7,
+        video_token_mask: torch.Tensor | None = None,
     ):
         config = config.get_text_config(decoder=True)
         layer_types, _ = get_layer_types_and_kwargs(config)
@@ -663,6 +872,7 @@ class VidkvCache(Cache):
                 q_group_size=q_group_size,
                 residual_length=residual_length,
                 ternary_threshold=ternary_threshold,
+                video_token_mask=video_token_mask,
             )
             for _ in range(config.num_hidden_layers)
         ]

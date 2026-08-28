@@ -11,6 +11,16 @@ Long-video KV cache quantization experiments.
 
 Fixed to **Qwen2.5-VL-7B-Instruct**. Do not swap models without updating this file.
 
+## W&B Logging
+
+`task full` logs to W&B by default at
+<https://wandb.ai/dlehddnjs245-kyung-hee-university/mllm-quant>. Run
+`pixi run wandb login` once, or set `WANDB_API_KEY`, before launching a run.
+
+The default run name is `full-YYYYMMDD-HHMMSS`. Override it with `WANDB=my-run-name`
+or `wandb=my-run-name`. Other eval tasks log to the same W&B project when `WANDB` or
+`wandb` is supplied. Override the destination with `WANDB_ENTITY=... WANDB_PROJECT=...`.
+
 ## Structure
 
 - `third-party/lmms-eval/` — vendored clone of [EvolvingLMMs-Lab/lmms-eval](https://github.com/EvolvingLMMs-Lab/lmms-eval), installed editable via `scripts/setup_env.sh`; gitignored, not version-controlled here

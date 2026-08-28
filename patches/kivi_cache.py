@@ -131,7 +131,7 @@ def _cat_nonempty(tensors: list[torch.Tensor | None], dim: int) -> torch.Tensor:
 def _check_prefill_length(
     keys: torch.Tensor, values: torch.Tensor, expected: int
 ) -> None:
-    """Guard the prefill reconstruction: a silent length mismatch would corrupt attention."""
+    """Guard that grouped+residual storage still covers the full prefill."""
     if keys.shape[-2] != expected or values.shape[-2] != expected:
         raise ValueError(
             "Prefill reconstruction lost tokens: expected "
@@ -141,12 +141,13 @@ def _check_prefill_length(
 
 class KiviLayer(QuantizedLayer):
     """
-    KIVI-style KV cache layer for tensors shaped [batch, kv_heads, seq_len, head_dim].
+    KIVI KV cache layer for tensors shaped [batch, kv_heads, seq_len, head_dim].
 
-    Keys are quantized per channel after transposing to [B, H, D, T], with groups along
-    the token axis. Values are quantized per token in [B, H, T, D], with groups along
-    the channel axis. The axis_key and axis_value arguments are accepted for API
-    compatibility with QuantizedCache; the KIVI update path uses the fixed axes above.
+    Paper settings (Liu et al., ICML 2024): 2-bit grouped quantization, group size 32,
+    residual length 128. Keys are quantized per-channel after transposing to [B, H, D, T],
+    with groups along the token axis. Values are quantized per-token in [B, H, T, D], with
+    groups along the channel axis. Attention receives dequantized grouped cache plus the
+    FP16 residual window for both prefill and decode.
     """
 
     def __init__(
@@ -284,11 +285,8 @@ class KiviLayer(QuantizedLayer):
                 return key_states, value_states
             self._append_keys(key_states)
             self._append_values(value_states)
-            # Prefill attention must see the quantized history too, otherwise the first
-            # generated token is bit-identical to fp16 and short-answer benchmarks measure
-            # nothing. After the appends, prefix + residual buffer reconstructs the whole
-            # prefill, so this is the same expression the decode path below uses, minus the
-            # trailing new-state term.
+            # Return the same reconstructed cache layout used by decode so prefill
+            # attention observes the quantized K/V history instead of the fp cache.
             keys_to_return = _cat_nonempty([self._dequantized_key_prefix(), self.keys], dim=-2)
             values_to_return = _cat_nonempty(
                 [self._dequantized_value_prefix(), self.values], dim=-2

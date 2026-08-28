@@ -38,7 +38,7 @@ All experiment commands go through `Taskfile.yml` (the `task` CLI), which wraps
 task setup              # pixi env + CUDA/FlashAttention2 verification
 task setup-venv         # legacy uv venv equivalent
 task smoke              # 1-sample lmms-eval smoke test (default task: mmstar)
-task full               # full lmms-eval run (default task: longvideobench_val_v)
+task full               # full lmms-eval run, W&B logging on by default
 task check-video-decode # preflight video decoding with the pinned backend/reader
 ```
 
@@ -46,13 +46,18 @@ Override task variables inline, e.g.:
 
 ```bash
 task full TASKS=longvideobench_val_v FRAMES=48 MIN_PIXELS=200704 MAX_PIXELS=401408 GPUS=1
-task smoke WANDB=my-run-name
+task full WANDB=my-run-name
+task smoke WANDB=my-smoke-run
 ```
 
 Notable variables (see `Taskfile.yml` for the full list/defaults): `FRAMES`, `MIN_PIXELS`,
 `MAX_PIXELS`, `FPS`, `VIDEO_READER` (defaults to `torchcodec`), `STRICT_VIDEO_READER`,
 `ATTN_IMPLEMENTATION` (defaults to `flash_attention_2`), `GPUS`, `OUTPUT_PATH` (defaults to
-`./results`), `CUDA_VISIBLE_DEVICES`.
+`./results`), `CUDA_VISIBLE_DEVICES`, `WANDB_ENTITY`, `WANDB_PROJECT`.
+
+`task full` logs to W&B by default at
+`dlehddnjs245-kyung-hee-university/mllm-quant`; use `WANDB=`/`wandb=` to override the run
+name. Other eval tasks log to the same destination when `WANDB=`/`wandb=` is supplied.
 
 Run directly with pixi when not using a Taskfile wrapper: `pixi run <cmd>`. Always run with
 `PYTHONNOUSERSITE=1 PYTHONPATH=` (as the tasks/scripts do) to avoid leaking user/system site-packages
@@ -82,7 +87,8 @@ rules `E,F,I,UP,B`). Tests: `pytest` (`testpaths = ["tests"]`; no `tests/` direc
   `torchcodec`) used during actual evaluation, before committing to a full run.
 - `results/` — gitignored output of `task smoke`/`task full` runs (JSON results, decode-preflight
   JSONL logs), organized by run type / model name / timestamp.
-- `wandb/` — gitignored local W&B run logs from tasks invoked with `wandb=`/`WANDB=`.
+- `wandb/` — gitignored local W&B run logs from default W&B tasks or tasks invoked with
+  `wandb=`/`WANDB=`.
 
 ## Key constraints to preserve
 
